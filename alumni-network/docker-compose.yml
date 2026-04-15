@@ -1,0 +1,61 @@
+services:
+  mongo:
+    image: mongo:7.0
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:-secret}
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: always
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=${PORT:-5000}
+      - MONGO_URI=${MONGO_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      - CLIENT_URL=${CLIENT_URL:-http://localhost:3000}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-5242880}
+    volumes:
+      - uploads_data:/app/uploads
+    expose:
+      - "5000"
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost/api}
+      - REACT_APP_SOCKET_URL=${REACT_APP_SOCKET_URL:-http://localhost}
+    expose:
+      - "80"
+      - "3000"
+
+  nginx:
+    image: nginx:1.25-alpine
+    restart: always
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  mongo_data:
+  uploads_data:

@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    environment {
+        // Ensure you create 'docker-hub-auth' in Jenkins global credentials
+        DOCKER_HUB_CREDENTIALS = credentials('docker-hub-auth')
+        PROJECT_NAME = "alumni-network"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Checked out project source code"
+            }
+        }
+
+        stage('Validate Infrastructure configuration') {
+            steps {
+                echo "Validating compose layout for safety..."
+                sh 'docker-compose -f docker-compose.yml config'
+            }
+        }
+
+        stage('Build & Push Backend') {
+            steps {
+                script {
+                    echo "Building Backend Docker Image using multi-stage logic..."
+                    def backendImage = docker.build("${DOCKER_HUB_CREDENTIALS_USR}/${PROJECT_NAME}-backend:latest", "./backend")
+                    
+                    echo "Pushing Backend Image to Docker Hub registry..."
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker-hub-auth') {
+                        backendImage.push()
+                    }
+                }
+            }
+        }
+
+        stage('Build & Push Frontend') {
+            steps {
+                script {
+                    echo "Building Frontend Docker Image mapping to Nginx Alpine..."
+                    def frontendImage = docker.build("${DOCKER_HUB_CREDENTIALS_USR}/${PROJECT_NAME}-frontend:latest", "-f ./frontend/Dockerfile ./frontend")
+                    
+                    echo "Pushing Frontend Image to Docker Hub registry..."
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker-hub-auth') {
+                        frontendImage.push()
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Staging Environment') {
+            steps {
+                echo "Spinning up fresh cluster using production architecture variants..."
+                sh 'docker-compose -f docker-compose.yml -f docker-compose.prod.yml down'
+                sh 'docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d'
+                echo "Deployment successfully triggered."
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'CI/CD Pipeline execution complete'
+        }
+        success {
+            echo 'All stages completed successfully! The Alumni Platform node is live.'
+        }
+        failure {
+            echo 'Pipeline failed due to unit break. Please triage immediately.'
+        }
+    }
+}
